@@ -2,6 +2,7 @@ package me.branduzzo.checkHacks.commands;
 
 import me.branduzzo.checkHacks.CheckHacksPlugin;
 import me.branduzzo.checkHacks.utils.MessageUtil;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
@@ -66,7 +67,8 @@ public class CheckLangCommand implements CommandExecutor, TabCompleter {
         }
 
         Player initiator = sender instanceof Player p ? p : null;
-        plugin.getLangCheckManager().startCheck(target, initiator, langs);
+        SchedulerUtil.runForEntity(plugin, target,
+                () -> plugin.getLangCheckManager().startCheck(target, initiator, langs));
         return true;
     }
 

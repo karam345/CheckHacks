@@ -2,6 +2,7 @@ package me.branduzzo.checkHacks.managers;
 
 import me.branduzzo.checkHacks.CheckHacksPlugin;
 import me.branduzzo.checkHacks.LangCheckData;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import me.branduzzo.checkHacks.utils.SignUtil;
 import me.branduzzo.checkHacks.utils.WebhookUtil;
 import net.kyori.adventure.text.Component;
@@ -13,7 +14,6 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.Sign;
 import org.bukkit.block.sign.Side;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -39,7 +39,7 @@ public class LangCheckManager {
 
         if (activeChecks.containsKey(uuid)) {
             if (initiator != null)
-                initiator.sendMessage(plugin.getMessageManager().get("already-checking",
+                sendToPlayer(initiator, plugin.getMessageManager().get("already-checking",
                         Map.of("player", target.getName())));
             return;
         }
@@ -49,11 +49,37 @@ public class LangCheckManager {
         activeChecks.put(uuid, data);
 
         if (initiator != null)
-            initiator.sendMessage(plugin.getMessageManager().get("lang-check-started",
+            sendToPlayer(initiator, plugin.getMessageManager().get("lang-check-started",
                     Map.of("player", target.getName())));
 
+        SchedulerUtil.runForEntity(plugin, target, () -> prepareCheck(target, data));
+    }
+
+    private void prepareCheck(Player target, LangCheckData data) {
+        UUID uuid = target.getUniqueId();
+        if (!target.isOnline()) {
+            abortCheck(uuid);
+            return;
+        }
+        if (!activeChecks.containsKey(uuid)) return;
+
         Location signLoc = SignUtil.findAirBlock(target);
-        if (signLoc == null) { activeChecks.remove(uuid); return; }
+        if (signLoc == null) {
+            plugin.getLogger().warning("[CheckHacks] No air block found for lang check on " + target.getName() + ".");
+            activeChecks.remove(uuid);
+            return;
+        }
+
+        SchedulerUtil.runAt(plugin, signLoc, () -> placeLangSign(target, data, signLoc));
+    }
+
+    private void placeLangSign(Player target, LangCheckData data, Location signLoc) {
+        UUID uuid = target.getUniqueId();
+        if (!target.isOnline()) {
+            abortCheck(uuid);
+            return;
+        }
+        if (!activeChecks.containsKey(uuid)) return;
 
         Block block = signLoc.getBlock();
         BlockState originalState = block.getState();
@@ -82,17 +108,19 @@ public class LangCheckManager {
 
         SignUtil.setAllowedEditor(signLoc, uuid, plugin);
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!activeChecks.containsKey(uuid)) return;
-            SignUtil.sendBlockEntityPacket(target, signLoc, plugin);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (!activeChecks.containsKey(uuid)) return;
-                SignUtil.sendOpenSignPacket(target, signLoc, plugin);
+        Object blockEntityPacket = SignUtil.createBlockEntityPacket(signLoc, plugin);
+        Object openSignPacket = SignUtil.createOpenSignPacket(signLoc, plugin);
+        SchedulerUtil.runForEntity(plugin, target, () -> {
+            if (!activeChecks.containsKey(uuid) || !target.isOnline()) return;
+            SignUtil.sendPacket(target, blockEntityPacket, plugin);
+            SchedulerUtil.runForEntityLater(plugin, target, () -> {
+                if (!activeChecks.containsKey(uuid) || !target.isOnline()) return;
+                SignUtil.sendPacket(target, openSignPacket, plugin);
                 target.sendBlockChange(signLoc, Material.AIR.createBlockData());
             }, 1L);
         });
 
-        BukkitTask timeout = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        SchedulerUtil.TaskHandle timeout = SchedulerUtil.runAtLater(plugin, signLoc, () -> {
             if (!activeChecks.containsKey(uuid)) return;
             restoreSign(data);
             activeChecks.remove(uuid);
@@ -166,14 +194,20 @@ public class LangCheckManager {
         if (data.getInitiatorUUID() == null) return;
         Player ini = Bukkit.getPlayer(data.getInitiatorUUID());
         if (ini == null || !ini.isOnline()) return;
-        boolean gets = ini.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(ini.getUniqueId());
-        if (!gets) ini.sendMessage(msg);
+        SchedulerUtil.runForEntity(plugin, ini, () -> {
+            boolean gets = ini.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(ini.getUniqueId());
+            if (!gets) ini.sendMessage(msg);
+        });
+    }
+
+    private void sendToPlayer(Player player, Component msg) {
+        SchedulerUtil.runForEntity(plugin, player, () -> player.sendMessage(msg));
     }
 
     private void restoreSign(LangCheckData data) {
         Location loc = data.getSignLocation();
         if (loc == null) return;
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        SchedulerUtil.runAt(plugin, loc, () -> {
             try { if (data.getOriginalState() != null) data.getOriginalState().update(true, false); }
             catch (Exception e) { plugin.getLogger().warning("[CheckHacks] LangRestore: " + e.getMessage()); }
             if (data.isBarrierPlaced() && data.getBarrierLocation() != null) {
@@ -189,5 +223,12 @@ public class LangCheckManager {
             restoreSign(d);
         }
         activeChecks.clear();
+    }
+
+    public void abortCheck(UUID uuid) {
+        LangCheckData data = activeChecks.remove(uuid);
+        if (data == null) return;
+        if (data.getTimeoutTask() != null) data.getTimeoutTask().cancel();
+        restoreSign(data);
     }
 }

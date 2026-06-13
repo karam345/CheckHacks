@@ -1,6 +1,7 @@
 package me.branduzzo.checkHacks.managers;
 
 import me.branduzzo.checkHacks.CheckHacksPlugin;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
@@ -23,21 +24,8 @@ public class MessageManager {
     }
 
     public void load() {
-        String lang = plugin.getConfigManager().getLanguage();
         ensureFile("messages/en.yml");
-        ensureFile("messages/it.yml");
-        ensureFile("messages/br.yml");
-        ensureFile("messages/de.yml");
-        ensureFile("messages/es.yml");
-        ensureFile("messages/fr.yml");
-        ensureFile("messages/lolcat.yml");
-        ensureFile("messages/ru.yml");
-        ensureFile("messages/uwu.yml");
-        File file = new File(plugin.getDataFolder(), "messages/" + lang + ".yml");
-        if (!file.exists()) {
-            plugin.getLogger().warning("messages/" + lang + ".yml not found, falling back to en.yml");
-            file = new File(plugin.getDataFolder(), "messages/en.yml");
-        }
+        File file = new File(plugin.getDataFolder(), "messages/en.yml");
         messages = YamlConfiguration.loadConfiguration(file);
     }
 
@@ -67,10 +55,16 @@ public class MessageManager {
     }
 
     public void broadcastAlerts(Component msg) {
-        for (Player p : Bukkit.getOnlinePlayers())
-            if (p.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(p.getUniqueId()))
-                p.sendMessage(msg);
-        Bukkit.getConsoleSender().sendMessage(msg);
+        SchedulerUtil.runGlobal(plugin, () -> {
+            for (Player p : Bukkit.getOnlinePlayers()) {
+                SchedulerUtil.runForEntity(plugin, p, () -> {
+                    if (p.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(p.getUniqueId())) {
+                        p.sendMessage(msg);
+                    }
+                });
+            }
+            Bukkit.getConsoleSender().sendMessage(msg);
+        });
     }
 
     private String applyPapi(Player player, String text) {

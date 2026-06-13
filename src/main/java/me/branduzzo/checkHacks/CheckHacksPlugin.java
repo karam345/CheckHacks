@@ -3,6 +3,7 @@ package me.branduzzo.checkHacks;
 import me.branduzzo.checkHacks.commands.*;
 import me.branduzzo.checkHacks.listeners.*;
 import me.branduzzo.checkHacks.managers.*;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.HashSet;
@@ -53,7 +54,8 @@ public class CheckHacksPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(acListener, this);
         acListener.registerHooks();
 
-        getLogger().info("CheckHacks v" + getDescription().getVersion() + " enabled.");
+        getLogger().info("CheckHacks v" + getDescription().getVersion() + " enabled"
+                + (SchedulerUtil.isFolia() ? " with Folia scheduler support." : "."));
     }
 
     @Override

@@ -63,7 +63,10 @@ public class ConfigManager {
     public HackDefinition getHack(String id)           { return hacks.get(id); }
 
     public List<HackDefinition> getDefaultCheckHacks() { return resolveHackList("default-check-hacks"); }
-    public List<HackDefinition> getJoinCheckHacks()    { return resolveHackList("auto-check-on-join.hacks"); }
+    public List<HackDefinition> getJoinCheckHacks() {
+        List<HackDefinition> joinHacks = resolveHackList("auto-check-on-join.hacks");
+        return joinHacks.isEmpty() ? getDefaultCheckHacks() : joinHacks;
+    }
     public List<HackDefinition> getFlagCheckHacks()    { return resolveHackList("detect-flag.hacks"); }
 
     private List<HackDefinition> resolveHackList(String path) {
@@ -76,29 +79,20 @@ public class ConfigManager {
     }
 
     public String getPrefix()    { return masterConfig.getString("prefix", "<yellow>[CheckHacks] <gray>"); }
-    public String getLanguage()  { return masterConfig.getString("language", "en"); }
 
     public boolean isDiscordEnabled()   { return masterConfig.getBoolean("discord.enabled", false); }
     public String  getWebhookUrl()      { return masterConfig.getString("discord.webhook-url", ""); }
     public int     getEmbedColor()      { return masterConfig.getInt("discord.embed-color", 16776960); }
     public String  getDiscordMessage()  { return masterConfig.getString("discord.message", ""); }
 
-    public boolean isBedrockEnabled()        { return masterConfig.getBoolean("bedrock.enabled", true); }
-    public List<String> getBedrockPrefixes() { return masterConfig.getStringList("bedrock.prefixes"); }
-
     public boolean isWebEditorEnabled() { return masterConfig.getBoolean("web-editor.enabled", true); }
     public int     getWebPort()         { return masterConfig.getInt("web-editor.port", 8080); }
     public String  getWebHost()         { return masterConfig.getString("web-editor.host", "localhost"); }
     public int     getTokenExpireMinutes() { return masterConfig.getInt("web-editor.token-expire-minutes", 10); }
 
-    public boolean isCommandIfPositiveEnabled() { return hacksConfig.getBoolean("command-if-positive.enabled", false); }
-    public String  getPositiveCommand()         { return hacksConfig.getString("command-if-positive.command", ""); }
-
-    public boolean isCommandIfProtectedEnabled() { return hacksConfig.getBoolean("command-if-protected.enabled", false); }
-    public String  getProtectedCommand()         { return hacksConfig.getString("command-if-protected.command", ""); }
-
-    public boolean isCommandIfCleanEnabled() { return hacksConfig.getBoolean("command-if-clean.enabled", false); }
-    public String  getCleanCommand()         { return hacksConfig.getString("command-if-clean.command", ""); }
+    public String getKickReason() {
+        return hacksConfig.getString("kick-reason", "<red>Cheats detected: <white>{hacks}");
+    }
 
     public boolean isDetectFlagEnabled() { return hacksConfig.getBoolean("detect-flag.enabled", false); }
     public boolean isGrimEnabled()       { return hacksConfig.getBoolean("detect-flag.anticheats.grim", true); }
@@ -106,7 +100,7 @@ public class ConfigManager {
     public boolean isSpartanEnabled()    { return hacksConfig.getBoolean("detect-flag.anticheats.spartan", true); }
     public long    getFlagCooldownHours(){ return hacksConfig.getLong("detect-flag.cooldown-hours", 24); }
 
-    public boolean isJoinCheckEnabled()  { return hacksConfig.getBoolean("auto-check-on-join.enabled", false); }
+    public boolean isJoinCheckEnabled()  { return hacksConfig.getBoolean("auto-check-on-join.enabled", true); }
     public boolean isOnlyFirstJoin()     { return hacksConfig.getBoolean("auto-check-on-join.only-first-join", false); }
 
     public int getTimeoutTicks()      { return hacksConfig.getInt("timeout-ticks", 200); }

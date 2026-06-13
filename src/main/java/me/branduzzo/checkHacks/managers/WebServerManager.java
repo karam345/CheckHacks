@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import me.branduzzo.checkHacks.CheckHacksPlugin;
 import me.branduzzo.checkHacks.HackDefinition;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -25,7 +26,7 @@ public class WebServerManager {
     public WebServerManager(CheckHacksPlugin plugin) {
         this.plugin = plugin;
         start();
-        Bukkit.getScheduler().runTaskTimer(plugin, this::updatePlayerCache, 0L, 100L);
+        SchedulerUtil.runGlobalTimer(plugin, this::updatePlayerCache, 0L, 100L);
     }
 
     private void start() {
@@ -137,19 +138,10 @@ public class WebServerManager {
             final String finalType   = type;
             final String finalTarget = targetName;
 
-            Bukkit.getScheduler().runTask(plugin, () -> {
+            SchedulerUtil.runGlobal(plugin, () -> {
                 Player target = Bukkit.getPlayerExact(finalTarget);
                 if (target == null) return;
-                if ("lang".equals(finalType)) {
-                    Map<String, String> langs = plugin.getConfigManager().getLanguages();
-                    if (!langs.isEmpty())
-                        plugin.getLangCheckManager().startCheck(target, null, langs);
-                } else {
-                    List<HackDefinition> hacks = plugin.getConfigManager().getDefaultCheckHacks();
-                    if (!hacks.isEmpty())
-                        plugin.getCheckManager().startCheck(target, null, hacks, false,
-                                "Web editor check by " + checkerName);
-                }
+                SchedulerUtil.runForEntity(plugin, target, () -> runWebCheck(target, finalType, checkerName));
             });
 
             sendJson(ex, 200, Map.of("success", true));
@@ -226,6 +218,20 @@ public class WebServerManager {
 
     private int parseInt(String s, int def) {
         try { return Integer.parseInt(s); } catch (Exception e) { return def; }
+    }
+
+    private void runWebCheck(Player target, String type, String checkerName) {
+        if ("lang".equals(type)) {
+            Map<String, String> langs = plugin.getConfigManager().getLanguages();
+            if (!langs.isEmpty()) plugin.getLangCheckManager().startCheck(target, null, langs);
+            return;
+        }
+
+        List<HackDefinition> hacks = plugin.getConfigManager().getDefaultCheckHacks();
+        if (!hacks.isEmpty()) {
+            plugin.getCheckManager().startCheck(target, null, hacks, false,
+                    "Web editor check by " + checkerName);
+        }
     }
 
     public void stop() {

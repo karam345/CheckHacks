@@ -136,17 +136,7 @@ detect-flag:
     - antiafk
     - baritone
 
-command-if-positive:
-  enabled: false
-  command: "tempban %player% 14d Cheating"
-
-command-if-protected:
-  enabled: false
-  command: "tempban %player% 14d Cheating"
-
-command-if-clean:
-  enabled: false
-  command: "give %player% diamond 1"
+kick-reason: "<red>Cheats detected: <white>{hacks}"
 
 timeout-ticks: 200
 between-sign-ticks: 20

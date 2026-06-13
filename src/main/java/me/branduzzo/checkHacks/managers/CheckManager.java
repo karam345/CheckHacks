@@ -1,6 +1,7 @@
 package me.branduzzo.checkHacks.managers;
 
 import me.branduzzo.checkHacks.*;
+import me.branduzzo.checkHacks.utils.SchedulerUtil;
 import me.branduzzo.checkHacks.utils.SignUtil;
 import me.branduzzo.checkHacks.utils.WebhookUtil;
 import net.kyori.adventure.text.Component;
@@ -13,7 +14,6 @@ import org.bukkit.block.BlockState;
 import org.bukkit.block.Sign;
 import org.bukkit.block.sign.Side;
 import org.bukkit.entity.Player;
-import org.bukkit.scheduler.BukkitTask;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,21 +44,9 @@ public class CheckManager {
 
         if (activeChecks.containsKey(uuid)) {
             if (initiator != null)
-                initiator.sendMessage(plugin.getMessageManager().get("already-checking",
+                sendToPlayer(initiator, plugin.getMessageManager().get("already-checking",
                         Map.of("player", target.getName())));
             return;
-        }
-
-        if (plugin.getConfigManager().isBedrockEnabled()) {
-            for (String prefix : plugin.getConfigManager().getBedrockPrefixes()) {
-                if (target.getName().startsWith(prefix)) {
-                    Component msg = plugin.getMessageManager().get("bedrock-skip",
-                            Map.of("player", target.getName()));
-                    if (initiator != null) initiator.sendMessage(msg);
-                    else plugin.getMessageManager().broadcastAlerts(msg);
-                    return;
-                }
-            }
         }
 
         if (autoCheck) lastAutoCheck.put(uuid, System.currentTimeMillis());
@@ -70,12 +58,14 @@ public class CheckManager {
                 initiator != null ? initiator.getUniqueId() : null,
                 batches, autoCheck, reason);
         activeChecks.put(uuid, data);
+        plugin.getLogger().info("[CheckHacks] Starting " + reason + " for " + target.getName()
+                + " with " + hacks.size() + " hack definitions.");
 
         if (initiator != null)
-            initiator.sendMessage(plugin.getMessageManager().get("check-started",
+            sendToPlayer(initiator, plugin.getMessageManager().get("check-started",
                     Map.of("player", target.getName())));
 
-        processBatch(target, data);
+        SchedulerUtil.runForEntity(plugin, target, () -> processBatch(target, data));
     }
 
     private List<List<HackDefinition>> buildBatches(List<HackDefinition> hacks) {
@@ -87,14 +77,33 @@ public class CheckManager {
 
     private void processBatch(Player target, CheckPlayerData data) {
         UUID uuid = target.getUniqueId();
-        List<HackDefinition> batch = data.getCurrentBatchHacks();
+        if (!target.isOnline()) {
+            abortCheck(uuid);
+            return;
+        }
+        if (!activeChecks.containsKey(uuid)) return;
 
         Location signLoc = SignUtil.findAirBlock(target);
         if (signLoc == null) {
+            plugin.getLogger().warning("[CheckHacks] No air block found for " + target.getName()
+                    + "; marking remaining checks as detected.");
+            markRemainingAsDetected(data);
             finishCheck(uuid);
             return;
         }
 
+        SchedulerUtil.runAt(plugin, signLoc, () -> placeBatchSign(target, data, signLoc));
+    }
+
+    private void placeBatchSign(Player target, CheckPlayerData data, Location signLoc) {
+        UUID uuid = target.getUniqueId();
+        if (!target.isOnline()) {
+            abortCheck(uuid);
+            return;
+        }
+        if (!activeChecks.containsKey(uuid)) return;
+
+        List<HackDefinition> batch = data.getCurrentBatchHacks();
         Block block = signLoc.getBlock();
         BlockState originalState = block.getState();
 
@@ -108,6 +117,7 @@ public class CheckManager {
         if (!(freshState instanceof Sign sign)) {
             originalState.update(true, false);
             if (placedBarrier) belowBlock.setType(Material.AIR, false);
+            markRemainingAsDetected(data);
             finishCheck(uuid);
             return;
         }
@@ -125,22 +135,24 @@ public class CheckManager {
 
         SignUtil.setAllowedEditor(signLoc, uuid, plugin);
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (!activeChecks.containsKey(uuid)) return;
-            SignUtil.sendBlockEntityPacket(target, signLoc, plugin);
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                if (!activeChecks.containsKey(uuid)) return;
-                SignUtil.sendOpenSignPacket(target, signLoc, plugin);
+        Object blockEntityPacket = SignUtil.createBlockEntityPacket(signLoc, plugin);
+        Object openSignPacket = SignUtil.createOpenSignPacket(signLoc, plugin);
+        SchedulerUtil.runForEntity(plugin, target, () -> {
+            if (!activeChecks.containsKey(uuid) || !target.isOnline()) return;
+            SignUtil.sendPacket(target, blockEntityPacket, plugin);
+            SchedulerUtil.runForEntityLater(plugin, target, () -> {
+                if (!activeChecks.containsKey(uuid) || !target.isOnline()) return;
+                SignUtil.sendPacket(target, openSignPacket, plugin);
                 target.sendBlockChange(signLoc, Material.AIR.createBlockData());
             }, 1L);
         });
 
-        BukkitTask timeout = Bukkit.getScheduler().runTaskLater(plugin, () -> {
+        SchedulerUtil.TaskHandle timeout = SchedulerUtil.runAtLater(plugin, signLoc, () -> {
             CheckPlayerData d = activeChecks.get(uuid);
             if (d == null) return;
             restoreCurrentSign(d);
             for (HackDefinition h : batch)
-                d.getResults().put(h.getId(), HackResult.PROTECTED);
+                d.getResults().put(h.getId(), HackResult.DETECTED);
             d.incrementBatch();
             scheduleNextOrFinish(uuid);
         }, plugin.getConfigManager().getTimeoutTicks());
@@ -200,7 +212,12 @@ public class CheckManager {
         CheckPlayerData data = activeChecks.get(uuid);
         if (data == null) return;
         if (data.hasMoreBatches()) {
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            Player target = Bukkit.getPlayer(uuid);
+            if (target == null || !target.isOnline()) {
+                finishCheck(uuid);
+                return;
+            }
+            SchedulerUtil.runForEntityLater(plugin, target, () -> {
                 Player t = Bukkit.getPlayer(uuid);
                 if (t != null && t.isOnline()) processBatch(t, data);
                 else finishCheck(uuid);
@@ -211,7 +228,7 @@ public class CheckManager {
     }
 
     private HackResult evaluateResponse(HackDefinition hack, String resp, boolean exploitPreventer) {
-        if (resp.isEmpty()) return HackResult.NOT_DETECTED;
+        if (resp.isEmpty()) return HackResult.DETECTED;
 
         return switch (hack.getMode()) {
             case METEOR -> {
@@ -221,15 +238,23 @@ public class CheckManager {
             }
             case TRANSLATE -> {
                 if (resp.toLowerCase().startsWith(hack.getFallback().toLowerCase()))         yield HackResult.NOT_DETECTED;
-                if (resp.equalsIgnoreCase(hack.getKey()))                                    yield HackResult.PROTECTED;
+                if (resp.equalsIgnoreCase(hack.getKey()))                                    yield HackResult.DETECTED;
                 yield HackResult.DETECTED;
             }
             case KEYBIND -> {
-                if (exploitPreventer && resp.equalsIgnoreCase(hack.getKey()))                yield HackResult.PROTECTED;
+                if (exploitPreventer && resp.equalsIgnoreCase(hack.getKey()))                yield HackResult.DETECTED;
                 if (resp.equalsIgnoreCase(hack.getKey()))                                    yield HackResult.NOT_DETECTED;
                 yield HackResult.DETECTED;
             }
         };
+    }
+
+    private void markRemainingAsDetected(CheckPlayerData data) {
+        for (int batchIndex = data.getCurrentBatch(); batchIndex < data.getBatches().size(); batchIndex++) {
+            for (HackDefinition hack : data.getBatches().get(batchIndex)) {
+                data.getResults().putIfAbsent(hack.getId(), HackResult.DETECTED);
+            }
+        }
     }
 
     private void finishCheck(UUID uuid) {
@@ -245,9 +270,7 @@ public class CheckManager {
                 : (data.isAutoCheck() ? "AutoCheck" : "Console");
 
         List<HackDefinition> allHacks = data.getBatches().stream().flatMap(List::stream).toList();
-        boolean anyDetected  = false;
-        boolean anyProtected = false;
-        boolean allClean     = true;
+        List<String> detectedHacks = new ArrayList<>();
         StringBuilder resultText = new StringBuilder();
 
         Component header = plugin.getMessageManager().get("check-complete", Map.of("player", targetName));
@@ -256,9 +279,7 @@ public class CheckManager {
 
         for (HackDefinition hack : allHacks) {
             HackResult r = data.getResults().getOrDefault(hack.getId(), HackResult.SKIPPED);
-            if (r == HackResult.DETECTED)  { anyDetected = true;  allClean = false; }
-            if (r == HackResult.PROTECTED) { anyProtected = true; allClean = false; }
-            if (r == HackResult.SKIPPED)     allClean = false;
+            if (r == HackResult.DETECTED) detectedHacks.add(hack.getDisplayName());
             resultText.append(hack.getDisplayName()).append(": ").append(r.name()).append("\n");
 
             String color = switch (r) {
@@ -275,7 +296,7 @@ public class CheckManager {
         }
 
         long scanId = plugin.getDatabaseManager().saveScan(
-                "hack", targetName, targetUUID, checkerName, data.getReason(), anyDetected);
+                "hack", targetName, targetUUID, checkerName, data.getReason(), !detectedHacks.isEmpty());
         for (HackDefinition hack : allHacks) {
             HackResult r = data.getResults().getOrDefault(hack.getId(), HackResult.SKIPPED);
             plugin.getDatabaseManager().saveHackResult(scanId, hack.getId(), hack.getDisplayName(), r.name());
@@ -292,18 +313,14 @@ public class CheckManager {
                     data.getReason(), hacksChecked, resultText.toString().trim());
         }
 
-        final String tn = targetName;
-        if (anyDetected && cfg.isCommandIfPositiveEnabled()) {
-            String cmd = cfg.getPositiveCommand().replace("%player%", tn);
-            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd));
-        }
-        if (anyProtected && !anyDetected && cfg.isCommandIfProtectedEnabled()) {
-            String cmd = cfg.getProtectedCommand().replace("%player%", tn);
-            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd));
-        }
-        if (allClean && cfg.isCommandIfCleanEnabled()) {
-            String cmd = cfg.getCleanCommand().replace("%player%", tn);
-            Bukkit.getScheduler().runTask(plugin, () -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd));
+        if (targetPlayer != null && targetPlayer.isOnline() && !detectedHacks.isEmpty()) {
+            String hacks = String.join(", ", detectedHacks);
+            String reason = cfg.getKickReason()
+                    .replace("{player}", targetName)
+                    .replace("{hack}", hacks)
+                    .replace("{hacks}", hacks);
+            SchedulerUtil.runForEntity(plugin, targetPlayer,
+                    () -> targetPlayer.kick(MiniMessage.miniMessage().deserialize(reason)));
         }
     }
 
@@ -311,14 +328,20 @@ public class CheckManager {
         if (data.getInitiatorUUID() == null) return;
         Player ini = Bukkit.getPlayer(data.getInitiatorUUID());
         if (ini == null || !ini.isOnline()) return;
-        boolean gets = ini.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(ini.getUniqueId());
-        if (!gets) ini.sendMessage(msg);
+        SchedulerUtil.runForEntity(plugin, ini, () -> {
+            boolean gets = ini.hasPermission("checkhacks.alerts") && plugin.hasAlertsEnabled(ini.getUniqueId());
+            if (!gets) ini.sendMessage(msg);
+        });
+    }
+
+    private void sendToPlayer(Player player, Component msg) {
+        SchedulerUtil.runForEntity(plugin, player, () -> player.sendMessage(msg));
     }
 
     private void restoreCurrentSign(CheckPlayerData data) {
         Location loc = data.getSignLocation();
         if (loc == null) return;
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        SchedulerUtil.runAt(plugin, loc, () -> {
             try { if (data.getOriginalState() != null) data.getOriginalState().update(true, false); }
             catch (Exception e) { plugin.getLogger().warning("[CheckHacks] Restore: " + e.getMessage()); }
             if (data.isBarrierPlaced() && data.getBarrierLocation() != null) {
@@ -335,5 +358,12 @@ public class CheckManager {
             restoreCurrentSign(d);
         }
         activeChecks.clear();
+    }
+
+    public void abortCheck(UUID uuid) {
+        CheckPlayerData data = activeChecks.remove(uuid);
+        if (data == null) return;
+        if (data.getSignTimeoutTask() != null) data.getSignTimeoutTask().cancel();
+        restoreCurrentSign(data);
     }
 }

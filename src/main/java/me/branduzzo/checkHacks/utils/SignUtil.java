@@ -44,6 +44,10 @@ public class SignUtil {
     }
 
     public static void sendBlockEntityPacket(Player player, Location loc, Plugin plugin) {
+        sendPacket(player, createBlockEntityPacket(loc, plugin), plugin);
+    }
+
+    public static Object createBlockEntityPacket(Location loc, Plugin plugin) {
         try {
             Object world = loc.getWorld().getClass().getMethod("getHandle").invoke(loc.getWorld());
             Class<?> bpClass = Class.forName("net.minecraft.core.BlockPos");
@@ -52,36 +56,45 @@ public class SignUtil {
             Method gbe = Arrays.stream(world.getClass().getMethods())
                     .filter(m -> m.getName().equals("getBlockEntity") && m.getParameterCount() == 1)
                     .findFirst().orElse(null);
-            if (gbe == null) return;
+            if (gbe == null) return null;
             Object be = gbe.invoke(world, bp);
-            if (be == null) return;
+            if (be == null) return null;
             Class<?> pktClass = Class.forName(
                     "net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket");
             Method create = Arrays.stream(pktClass.getMethods())
                     .filter(m -> m.getName().equals("create") && m.getParameterCount() == 1)
                     .findFirst().orElse(null);
-            if (create == null) return;
-            sendPacket(player, create.invoke(null, be), plugin);
+            if (create == null) return null;
+            return create.invoke(null, be);
         } catch (Exception e) {
-            plugin.getLogger().warning("[CheckHacks] sendBlockEntityPacket: " + e.getMessage());
+            plugin.getLogger().warning("[CheckHacks] createBlockEntityPacket: " + e.getMessage());
+            return null;
         }
     }
 
     public static void sendOpenSignPacket(Player player, Location loc, Plugin plugin) {
+        sendPacket(player, createOpenSignPacket(loc, plugin), plugin);
+    }
+
+    public static Object createOpenSignPacket(Location loc, Plugin plugin) {
         try {
             Class<?> bpClass  = Class.forName("net.minecraft.core.BlockPos");
             Class<?> pktClass = Class.forName(
                     "net.minecraft.network.protocol.game.ClientboundOpenSignEditorPacket");
             Object bp     = bpClass.getConstructor(int.class, int.class, int.class)
                     .newInstance(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
-            Object packet = pktClass.getConstructor(bpClass, boolean.class).newInstance(bp, true);
-            sendPacket(player, packet, plugin);
+            return pktClass.getConstructor(bpClass, boolean.class).newInstance(bp, true);
         } catch (Exception e) {
-            plugin.getLogger().warning("[CheckHacks] sendOpenSignPacket: " + e.getMessage());
+            plugin.getLogger().warning("[CheckHacks] createOpenSignPacket: " + e.getMessage());
+            return null;
         }
     }
 
     public static void sendPacket(Player player, Object packet, Plugin plugin) {
+        if (packet == null) {
+            plugin.getLogger().warning("[CheckHacks] sendPacket: packet is null");
+            return;
+        }
         try {
             Object handle = player.getClass().getMethod("getHandle").invoke(player);
             Object conn = null;

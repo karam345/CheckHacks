@@ -7,6 +7,7 @@ CheckHacks is an innovative server-side anticheat plugin that detects client-sid
 ## 🧱 Features
 
 * Uses the Sign Translation Vulnerability (MC-265322), works entirely server-side, no client mod needed
+* Supports Paper and Folia scheduler environments
 * Checks up to 3 mods per sign, multiple signs sent sequentially with configurable delay
 * Three detection modes - **METEOR**, **TRANSLATE**, **KEYBIND**, each mod uses the correct one automatically
 * Players with exploit protection are marked as **PROTECTED** instead of false negatives
@@ -24,7 +25,7 @@ CheckHacks is an innovative server-side anticheat plugin that detects client-sid
 * Anticheat integration: triggers automatic checks when **Grim**, **Vulcan** or **Spartan** flags a player
 * Configurable cooldown between automatic checks per player to avoid spam
 * Separate hack lists for **default checks**, **join checks** and **anticheat-triggered checks**
-* Optional commands triggered automatically on **DETECTED**, **PROTECTED** or clean results
+* Optional kick command triggered automatically only on **DETECTED** results
 * Bedrock player detection: players whose name starts with a configured prefix (e.g. `.` or `*`) are automatically skipped
 * Results broadcast to all players with the `checkhacks.alerts` permission, individually toggleable with `/chalerts`
 * Results also sent privately to the player who ran the check if they don't have the alerts permission
@@ -36,7 +37,7 @@ CheckHacks is an innovative server-side anticheat plugin that detects client-sid
 * **Web editor** runs directly on your server - view all scans, browse players, run new checks and see lang results from a browser
 * Web editor uses time-limited tokens generated with `/cheditor`, no password needed
 * Configs are split by function: `config.yml` for global settings, `checkhacks.yml` for hack checks, `checklang.yml` for language checks
-* Plugin messages in separate language files (`messages/en.yml`, `it.yml`, `de.yml`, `es.yml`, `fr.yml`, `pt.yml`, `ru.yml`, `lolcat.yml`, `uwu.yml`) - switchable with a single config line
+* Plugin messages are English-only in `messages/en.yml`
 * Every message fully editable with **MiniMessage** formatting, configurable prefix and **PlaceholderAPI** support
 * Permissions: `checkhacks.check`, `checkhacks.reload`, `checkhacks.alerts`, `checkhacks.checklang`, `checkhacks.editor`, `checkhacks.*`
 
